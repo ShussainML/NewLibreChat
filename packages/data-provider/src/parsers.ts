@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import type { ZodIssue } from 'zod';
 import type * as a from './types/assistants';
 import type * as s from './schemas';
@@ -17,7 +18,6 @@ import {
   compactAssistantSchema,
 } from './schemas';
 import { bedrockInputSchema } from './bedrock';
-import { extractEnvVariable } from './utils';
 import { alternateName } from './config';
 
 type EndpointSchema =
@@ -121,19 +121,6 @@ export function errorsToString(errors: ZodIssue[]) {
     .join(' ');
 }
 
-/** Resolves header values to env variables if detected */
-export function resolveHeaders(headers: Record<string, string> | undefined) {
-  const resolvedHeaders = { ...(headers ?? {}) };
-
-  if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
-    Object.keys(headers).forEach((key) => {
-      resolvedHeaders[key] = extractEnvVariable(headers[key]);
-    });
-  }
-
-  return resolvedHeaders;
-}
-
 export function getFirstDefinedValue(possibleValues: string[]) {
   let returnValue;
   for (const value of possibleValues) {
@@ -224,12 +211,14 @@ const extractOmniVersion = (modelStr: string): string => {
 export const getResponseSender = (endpointOption: t.TEndpointOption): string => {
   const {
     model: _m,
-    endpoint,
+    endpoint: _e,
     endpointType,
     modelDisplayLabel: _mdl,
     chatGptLabel: _cgl,
     modelLabel: _ml,
   } = endpointOption;
+
+  const endpoint = _e as EModelEndpoint;
 
   const model = _m ?? '';
   const modelDisplayLabel = _mdl ?? '';
@@ -252,6 +241,8 @@ export const getResponseSender = (endpointOption: t.TEndpointOption): string => 
       return extractOmniVersion(model);
     } else if (model && (model.includes('mistral') || model.includes('codestral'))) {
       return 'Mistral';
+    } else if (model && model.includes('deepseek')) {
+      return 'Deepseek';
     } else if (model && model.includes('gpt-')) {
       const gptVersion = extractGPTVersion(model);
       return gptVersion || 'GPT';
@@ -270,13 +261,11 @@ export const getResponseSender = (endpointOption: t.TEndpointOption): string => 
   if (endpoint === EModelEndpoint.google) {
     if (modelLabel) {
       return modelLabel;
-    } else if (model && (model.includes('gemini') || model.includes('learnlm'))) {
-      return 'Gemini';
-    } else if (model && model.includes('code')) {
-      return 'Codey';
+    } else if (model?.toLowerCase().includes('gemma') === true) {
+      return 'Gemma';
     }
 
-    return 'PaLM2';
+    return 'Gemini';
   }
 
   if (endpoint === EModelEndpoint.custom || endpointType === EModelEndpoint.custom) {
@@ -288,6 +277,8 @@ export const getResponseSender = (endpointOption: t.TEndpointOption): string => 
       return extractOmniVersion(model);
     } else if (model && (model.includes('mistral') || model.includes('codestral'))) {
       return 'Mistral';
+    } else if (model && model.includes('deepseek')) {
+      return 'Deepseek';
     } else if (model && model.includes('gpt-')) {
       const gptVersion = extractGPTVersion(model);
       return gptVersion || 'GPT';
@@ -335,7 +326,7 @@ export const parseCompactConvo = ({
   possibleValues?: TPossibleValues;
   // TODO: POC for default schema
   // defaultSchema?: Partial<EndpointSchema>,
-}) => {
+}): Omit<s.TConversation, 'iconURL'> | null => {
   if (!endpoint) {
     throw new Error(`undefined endpoint: ${endpoint}`);
   }
@@ -352,7 +343,11 @@ export const parseCompactConvo = ({
     throw new Error(`Unknown endpointType: ${endpointType}`);
   }
 
-  const convo = schema.parse(conversation) as s.TConversation | null;
+  // Strip iconURL from input before parsing - it should only be derived server-side
+  // from model spec configuration, not accepted from client requests
+  const { iconURL: _clientIconURL, ...conversationWithoutIconURL } = conversation;
+
+  const convo = schema.parse(conversationWithoutIconURL) as s.TConversation | null;
   // const { models, secondaryModels } = possibleValues ?? {};
   const { models } = possibleValues ?? {};
 
@@ -378,7 +373,7 @@ export function parseTextParts(
       continue;
     }
     if (part.type === ContentTypes.TEXT) {
-      const textValue = typeof part.text === 'string' ? part.text : part.text.value;
+      const textValue = (typeof part.text === 'string' ? part.text : part.text?.value) || '';
 
       if (
         result.length > 0 &&
@@ -417,4 +412,29 @@ export function findLastSeparatorIndex(text: string, separators = SEPARATORS): n
     }
   }
   return lastIndex;
+}
+
+export function replaceSpecialVars({ text, user }: { text: string; user?: t.TUser | null }) {
+  let result = text;
+  if (!result) {
+    return result;
+  }
+
+  // e.g., "2024-04-29 (1)" (1=Monday)
+  const currentDate = dayjs().format('YYYY-MM-DD');
+  const dayNumber = dayjs().day();
+  const combinedDate = `${currentDate} (${dayNumber})`;
+  result = result.replace(/{{current_date}}/gi, combinedDate);
+
+  const currentDatetime = dayjs().format('YYYY-MM-DD HH:mm:ss');
+  result = result.replace(/{{current_datetime}}/gi, `${currentDatetime} (${dayNumber})`);
+
+  const isoDatetime = dayjs().toISOString();
+  result = result.replace(/{{iso_datetime}}/gi, isoDatetime);
+
+  if (user && user.name) {
+    result = result.replace(/{{current_user}}/gi, user.name);
+  }
+
+  return result;
 }
