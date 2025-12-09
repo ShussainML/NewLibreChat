@@ -1,6 +1,7 @@
 const { z } = require('zod');
-const Message = require('./schema/messageSchema');
-const { logger } = require('~/config');
+const { logger } = require('@librechat/data-schemas');
+const { createTempChatExpirationDate } = require('@librechat/api');
+const { Message } = require('~/db/models');
 
 const idSchema = z.string().uuid();
 
@@ -9,7 +10,7 @@ const idSchema = z.string().uuid();
  *
  * @async
  * @function saveMessage
- * @param {Express.Request} req - The request object containing user information.
+ * @param {ServerRequest} req - The request object containing user information.
  * @param {Object} params - The message data object.
  * @param {string} params.endpoint - The endpoint where the message originated.
  * @param {string} params.iconURL - The URL of the sender's icon.
@@ -54,13 +55,25 @@ async function saveMessage(req, params, metadata) {
     };
 
     if (req?.body?.isTemporary) {
-      const expiredAt = new Date();
-      expiredAt.setDate(expiredAt.getDate() + 30);
-      update.expiredAt = expiredAt;
+      try {
+        const appConfig = req.config;
+        update.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
+      } catch (err) {
+        logger.error('Error creating temporary chat expiration date:', err);
+        logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
+        update.expiredAt = null;
+      }
     } else {
       update.expiredAt = null;
     }
 
+    if (update.tokenCount != null && isNaN(update.tokenCount)) {
+      logger.warn(
+        `Resetting invalid \`tokenCount\` for message \`${params.messageId}\`: ${update.tokenCount}`,
+      );
+      logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
+      update.tokenCount = 0;
+    }
     const message = await Message.findOneAndUpdate(
       { messageId: params.messageId, user: req.user.id },
       update,
@@ -97,7 +110,9 @@ async function saveMessage(req, params, metadata) {
         };
       } catch (findError) {
         // If the findOne also fails, log it but don't crash
-        logger.warn(`Could not retrieve existing message with ID ${params.messageId}: ${findError.message}`);
+        logger.warn(
+          `Could not retrieve existing message with ID ${params.messageId}: ${findError.message}`,
+        );
         return {
           ...params,
           messageId: params.messageId,
@@ -130,7 +145,6 @@ async function bulkSaveMessages(messages, overrideTimestamp = false) {
         upsert: true,
       },
     }));
-
     const result = await Message.bulkWrite(bulkOps);
     return result;
   } catch (err) {
@@ -245,6 +259,7 @@ async function updateMessage(req, message, metadata) {
       text: updatedMessage.text,
       isCreatedByUser: updatedMessage.isCreatedByUser,
       tokenCount: updatedMessage.tokenCount,
+      feedback: updatedMessage.feedback,
     };
   } catch (err) {
     logger.error('Error updating message:', err);
@@ -331,8 +346,8 @@ async function getMessage({ user, messageId }) {
  *
  * @async
  * @function deleteMessages
- * @param {Object} filter - The filter criteria to find messages to delete.
- * @returns {Promise<Object>} The metadata with count of deleted messages.
+ * @param {import('mongoose').FilterQuery<import('mongoose').Document>} filter - The filter criteria to find messages to delete.
+ * @returns {Promise<import('mongoose').DeleteResult>} The metadata with count of deleted messages.
  * @throws {Error} If there is an error in deleting messages.
  */
 async function deleteMessages(filter) {
@@ -345,7 +360,6 @@ async function deleteMessages(filter) {
 }
 
 module.exports = {
-  Message,
   saveMessage,
   bulkSaveMessages,
   recordMessage,

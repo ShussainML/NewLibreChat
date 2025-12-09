@@ -1,5 +1,6 @@
 import {
   Tools,
+  Constants,
   ContentTypes,
   ToolCallTypes,
   imageGenTools,
@@ -7,17 +8,15 @@ import {
 } from 'librechat-data-provider';
 import { memo } from 'react';
 import type { TMessageContentParts, TAttachment } from 'librechat-data-provider';
+import { OpenAIImageGen, EmptyText, Reasoning, ExecuteCode, AgentUpdate, Text } from './Parts';
 import { ErrorMessage } from './MessageContent';
-import AgentUpdate from './Parts/AgentUpdate';
-import ExecuteCode from './Parts/ExecuteCode';
 import RetrievalCall from './RetrievalCall';
-import Reasoning from './Parts/Reasoning';
-import EmptyText from './Parts/EmptyText';
+import AgentHandoff from './AgentHandoff';
 import CodeAnalyze from './CodeAnalyze';
 import Container from './Container';
+import WebSearch from './WebSearch';
 import ToolCall from './ToolCall';
 import ImageGen from './ImageGen';
-import Text from './Parts/Text';
 import Image from './Image';
 
 type PartProps = {
@@ -60,12 +59,16 @@ const Part = memo(
         </>
       );
     } else if (part.type === ContentTypes.TEXT) {
-      const text = typeof part.text === 'string' ? part.text : part.text.value;
+      const text = typeof part.text === 'string' ? part.text : part.text?.value;
 
       if (typeof text !== 'string') {
         return null;
       }
       if (part.tool_call_ids != null && !text) {
+        return null;
+      }
+      /** Skip rendering if text is only whitespace to avoid empty Container */
+      if (!isLast && text.length > 0 && /^\s*$/.test(text)) {
         return null;
       }
       return (
@@ -74,11 +77,11 @@ const Part = memo(
         </Container>
       );
     } else if (part.type === ContentTypes.THINK) {
-      const reasoning = typeof part.think === 'string' ? part.think : part.think.value;
+      const reasoning = typeof part.think === 'string' ? part.think : part.think?.value;
       if (typeof reasoning !== 'string') {
         return null;
       }
-      return <Reasoning reasoning={reasoning} />;
+      return <Reasoning reasoning={reasoning} isLast={isLast ?? false} />;
     } else if (part.type === ContentTypes.TOOL_CALL) {
       const toolCall = part[ContentTypes.TOOL_CALL];
 
@@ -91,11 +94,43 @@ const Part = memo(
       if (isToolCall && toolCall.name === Tools.execute_code) {
         return (
           <ExecuteCode
+            attachments={attachments}
+            isSubmitting={isSubmitting}
+            output={toolCall.output ?? ''}
+            initialProgress={toolCall.progress ?? 0.1}
             args={typeof toolCall.args === 'string' ? toolCall.args : ''}
+          />
+        );
+      } else if (
+        isToolCall &&
+        (toolCall.name === 'image_gen_oai' || toolCall.name === 'image_edit_oai')
+      ) {
+        return (
+          <OpenAIImageGen
+            initialProgress={toolCall.progress ?? 0.1}
+            isSubmitting={isSubmitting}
+            toolName={toolCall.name}
+            args={typeof toolCall.args === 'string' ? toolCall.args : ''}
+            output={toolCall.output ?? ''}
+            attachments={attachments}
+          />
+        );
+      } else if (isToolCall && toolCall.name === Tools.web_search) {
+        return (
+          <WebSearch
             output={toolCall.output ?? ''}
             initialProgress={toolCall.progress ?? 0.1}
             isSubmitting={isSubmitting}
             attachments={attachments}
+            isLast={isLast}
+          />
+        );
+      } else if (isToolCall && toolCall.name?.startsWith(Constants.LC_TRANSFER_TO_)) {
+        return (
+          <AgentHandoff
+            args={toolCall.args ?? ''}
+            name={toolCall.name || ''}
+            output={toolCall.output ?? ''}
           />
         );
       } else if (isToolCall) {
@@ -109,6 +144,7 @@ const Part = memo(
             attachments={attachments}
             auth={toolCall.auth}
             expires_at={toolCall.expires_at}
+            isLast={isLast}
           />
         );
       } else if (toolCall.type === ToolCallTypes.CODE_INTERPRETER) {
@@ -118,7 +154,6 @@ const Part = memo(
             initialProgress={toolCall.progress ?? 0.1}
             code={code_interpreter.input}
             outputs={code_interpreter.outputs ?? []}
-            isSubmitting={isSubmitting}
           />
         );
       } else if (
@@ -158,6 +193,7 @@ const Part = memo(
             args={toolCall.function.arguments as string}
             name={toolCall.function.name}
             output={toolCall.function.output}
+            isLast={isLast}
           />
         );
       }

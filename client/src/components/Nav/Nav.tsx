@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState, useMemo, memo, lazy, Suspense, useRef } from 'react';
 import { useRecoilValue } from 'recoil';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useMediaQuery } from '@librechat/client';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
-import type { TConversation, ConversationListResponse } from 'librechat-data-provider';
+import type { ConversationListResponse } from 'librechat-data-provider';
 import type { InfiniteQueryObserverResult } from '@tanstack/react-query';
 import {
   useLocalize,
   useHasAccess,
-  useMediaQuery,
   useAuthContext,
   useLocalStorage,
   useNavScrolling,
 } from '~/hooks';
 import { useConversationsInfiniteQuery } from '~/data-provider';
 import { Conversations } from '~/components/Conversations';
-import NavToggle from './NavToggle';
 import SearchBar from './SearchBar';
 import NewChat from './NewChat';
 import { cn } from '~/utils';
@@ -21,6 +21,7 @@ import store from '~/store';
 
 const BookmarkNav = lazy(() => import('./Bookmarks/BookmarkNav'));
 const AccountSettings = lazy(() => import('./AccountSettings'));
+const AgentMarketplaceButton = lazy(() => import('./AgentMarketplaceButton'));
 
 const NAV_WIDTH_DESKTOP = '260px';
 const NAV_WIDTH_MOBILE = '320px';
@@ -31,7 +32,7 @@ const NavMask = memo(
       id="mobile-nav-mask-toggle"
       role="button"
       tabIndex={0}
-      className={`nav-mask ${navVisible ? 'active' : ''}`}
+      className={`nav-mask transition-opacity duration-200 ease-in-out ${navVisible ? 'active opacity-100' : 'opacity-0'}`}
       onClick={toggleNavVisible}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -59,7 +60,6 @@ const Nav = memo(
     const [navWidth, setNavWidth] = useState(NAV_WIDTH_DESKTOP);
     const isSmallScreen = useMediaQuery('(max-width: 768px)');
     const [newUser, setNewUser] = useLocalStorage('newUser', true);
-    const [isToggleHovering, setIsToggleHovering] = useState(false);
     const [showLoading, setShowLoading] = useState(false);
     const [tags, setTags] = useState<string[]>([]);
 
@@ -152,9 +152,16 @@ const Nav = memo(
     }, [isFetchingNextPage, computedHasNextPage, fetchNextPage]);
 
     const subHeaders = useMemo(
+      () => search.enabled === true && <SearchBar isSmallScreen={isSmallScreen} />,
+      [search.enabled, isSmallScreen],
+    );
+
+    const headerButtons = useMemo(
       () => (
         <>
-          {search.enabled === true && <SearchBar isSmallScreen={isSmallScreen} />}
+          <Suspense fallback={null}>
+            <AgentMarketplaceButton isSmallScreen={isSmallScreen} toggleNav={toggleNavVisible} />
+          </Suspense>
           {hasAccessToBookmarks && (
             <>
               <div className="mt-1.5" />
@@ -165,7 +172,7 @@ const Nav = memo(
           )}
         </>
       ),
-      [search.enabled, hasAccessToBookmarks, isSmallScreen, tags, setTags],
+      [hasAccessToBookmarks, tags, isSmallScreen, toggleNavVisible],
     );
 
     const [isSearchLoading, setIsSearchLoading] = useState(
@@ -184,37 +191,33 @@ const Nav = memo(
 
     return (
       <>
-        <div
-          data-testid="nav"
-          className={cn(
-            'nav active max-w-[320px] flex-shrink-0 overflow-x-hidden bg-surface-primary-alt',
-            'md:max-w-[260px]',
-          )}
-          style={{
-            width: navVisible ? navWidth : '0px',
-            visibility: navVisible ? 'visible' : 'hidden',
-            transition: 'width 0.2s, visibility 0.2s',
-          }}
-        >
-          <div className="h-full w-[320px] md:w-[260px]">
-            <div className="flex h-full flex-col">
-              <div
-                className={cn(
-                  'flex h-full flex-col transition-opacity',
-                  isToggleHovering && !isSmallScreen ? 'opacity-50' : 'opacity-100',
-                )}
-              >
+        <AnimatePresence initial={false}>
+          {navVisible && (
+            <motion.div
+              data-testid="nav"
+              className={cn(
+                'nav active max-w-[320px] flex-shrink-0 overflow-x-hidden bg-surface-primary-alt',
+                'md:max-w-[260px]',
+              )}
+              initial={{ width: 0 }}
+              animate={{ width: navWidth }}
+              exit={{ width: 0 }}
+              transition={{ duration: 0.2 }}
+              key="nav"
+            >
+              <div className="h-full w-[320px] md:w-[260px]">
                 <div className="flex h-full flex-col">
                   <nav
                     id="chat-history-nav"
                     aria-label={localize('com_ui_chat_history')}
-                    className="flex h-full flex-col px-3 pb-3.5"
+                    className="flex h-full flex-col px-2 pb-3.5 md:px-3"
                   >
                     <div className="flex flex-1 flex-col" ref={outerContainerRef}>
                       <MemoNewChat
-                        toggleNav={itemToggleNav}
-                        isSmallScreen={isSmallScreen}
                         subHeaders={subHeaders}
+                        toggleNav={toggleNavVisible}
+                        headerButtons={headerButtons}
+                        isSmallScreen={isSmallScreen}
                       />
                       <Conversations
                         conversations={conversations}
@@ -232,18 +235,9 @@ const Nav = memo(
                   </nav>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <NavToggle
-          isHovering={isToggleHovering}
-          setIsHovering={setIsToggleHovering}
-          onToggle={toggleNavVisible}
-          navVisible={navVisible}
-          className="fixed left-0 top-1/2 z-40 hidden md:flex"
-        />
-
+            </motion.div>
+          )}
+        </AnimatePresence>
         {isSmallScreen && <NavMask navVisible={navVisible} toggleNavVisible={toggleNavVisible} />}
       </>
     );

@@ -37,6 +37,7 @@ export const bedrockInputSchema = s.tConversationSchema
     stop: true,
     thinking: true,
     thinkingBudget: true,
+    promptCache: true,
     /* Catch-all fields */
     topK: true,
     additionalModelRequestFields: true,
@@ -78,6 +79,7 @@ export const bedrockInputParser = s.tConversationSchema
     stop: true,
     thinking: true,
     thinkingBudget: true,
+    promptCache: true,
     /* Catch-all fields */
     topK: true,
     additionalModelRequestFields: true,
@@ -100,6 +102,7 @@ export const bedrockInputParser = s.tConversationSchema
       'temperature',
       'topP',
       'stop',
+      'promptCache',
     ];
 
     const additionalFields: Record<string, unknown> = {};
@@ -119,7 +122,10 @@ export const bedrockInputParser = s.tConversationSchema
     /** Default thinking and thinkingBudget for 'anthropic.claude-3-7-sonnet' models, if not defined */
     if (
       typeof typedData.model === 'string' &&
-      typedData.model.includes('anthropic.claude-3-7-sonnet')
+      (typedData.model.includes('anthropic.claude-3-7-sonnet') ||
+        /anthropic\.claude-(?:[4-9](?:\.\d+)?(?:-\d+)?-(?:sonnet|opus|haiku)|(?:sonnet|opus|haiku)-[4-9])/.test(
+          typedData.model,
+        ))
     ) {
       if (additionalFields.thinking === undefined) {
         additionalFields.thinking = true;
@@ -135,6 +141,15 @@ export const bedrockInputParser = s.tConversationSchema
     } else if (additionalFields.thinking != null || additionalFields.thinkingBudget != null) {
       delete additionalFields.thinking;
       delete additionalFields.thinkingBudget;
+    }
+
+    /** Default promptCache for claude and nova models, if not defined */
+    if (
+      typeof typedData.model === 'string' &&
+      (typedData.model.includes('claude') || typedData.model.includes('nova')) &&
+      typedData.promptCache === undefined
+    ) {
+      typedData.promptCache = true;
     }
 
     if (Object.keys(additionalFields).length > 0) {

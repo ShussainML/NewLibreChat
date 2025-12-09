@@ -10,18 +10,19 @@ import type {
 } from 'librechat-data-provider';
 import type { MentionOption, ConvoGenerator } from '~/common';
 import { getConvoSwitchLogic, getModelSpecIconURL, removeUnavailableTools, logger } from '~/utils';
-import { useChatContext } from '~/Providers';
 import { useDefaultConvo } from '~/hooks';
 import store from '~/store';
 
 export default function useSelectMention({
   presets,
   modelSpecs,
+  conversation,
   assistantsMap,
+  returnHandlers,
   endpointsConfig,
   newConversation,
-  returnHandlers,
 }: {
+  conversation: TConversation | null;
   presets?: TPreset[];
   modelSpecs: TModelSpec[];
   assistantsMap?: TAssistantsMap;
@@ -29,7 +30,6 @@ export default function useSelectMention({
   endpointsConfig: TEndpointsConfig;
   returnHandlers?: boolean;
 }) {
-  const { conversation } = useChatContext();
   const getDefaultConversation = useDefaultConvo();
   const modularChat = useRecoilValue(store.modularChat);
   const availableTools = useRecoilValue(store.availableTools);
@@ -225,6 +225,7 @@ export default function useSelectMention({
       newPreset.iconURL = newPreset.iconURL ?? null;
       newPreset.modelLabel = newPreset.modelLabel ?? null;
       const isModular = isCurrentModular && isNewModular && shouldSwitch;
+      const disableParams = newPreset.defaultPreset === true;
       if (isExistingConversation && isModular) {
         template.endpointType = newEndpointType as EModelEndpoint | undefined;
         template.spec = null;
@@ -244,12 +245,17 @@ export default function useSelectMention({
           preset: newPreset,
           keepLatestMessage: true,
           keepAddedConvos: true,
+          disableParams,
         });
         return;
       }
 
       logger.info('conversation', 'Switching conversation to new preset', template);
-      newConversation({ preset: newPreset, keepAddedConvos: isModular });
+      newConversation({
+        preset: newPreset,
+        keepAddedConvos: isModular,
+        disableParams,
+      });
     },
     [
       modularChat,
